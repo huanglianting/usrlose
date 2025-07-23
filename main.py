@@ -95,7 +95,77 @@ def handle_missing_values(df, save_path=None):
     return df
 
 
-def build_time_features(df):
+def build_time_features(time_path):
+    """
+    从时间行为表构建完整的活跃度和时间偏好特征
+    参数:
+        time_path: 时间行为表路径
+    返回:
+        包含所有时间特征的DataFrame (每个用户一行)
+    """
+
+    # 读取时间行为表
+    time_columns = [
+        'user_id', 'date', 'a_page', 'other_page', 'b_page', 'b_promotion', 'c_active',
+        'd_related_x', 'd_related_y', 'd_related_u', 'e_related_x', 'e_related_y', 'e_related_u', 'e_related_v',
+        'd_related_v',
+        'f_page', 'f_page_m', 'f_page_n', 'h_used',
+        'rest', 'job', 'night', 'weekend', 'weekday'
+    ]
+    time_df = pd.read_csv(time_path, header=None, names=time_columns)
+    # 按用户和日期去重 (避免同一天多条记录)
+    daily_df = time_df.drop_duplicates(['user_id', 'date'])
+    # 按用户分组计算
+    grouped = daily_df.groupby('user_id')
+    # 创建特征DataFrame
+    features_df = pd.DataFrame()
+    features_df['user_id'] = daily_df['user_id'].unique()
+
+    # 1. 活跃度特征
+    # (1) 各服务活跃率
+    service_columns = ['a_page', 'other_page', 'b_page', 'b_promotion', 'c_active',
+                       'd_related_x', 'd_related_y', 'd_related_u', 'd_related_v',
+                       'e_related_x', 'e_related_y', 'e_related_u', 'e_related_v',
+                       'f_page', 'f_page_m', 'f_page_n', 'h_used']
+    for col in service_columns:
+        features_df[f'{col}_active_ratio'] = grouped[col].apply(
+            lambda x: (x == 1).sum() / len(x)
+        ).values
+
+    # (2) 关联服务活跃度
+    # d_related系列
+    d_related_cols = ['d_related_x', 'd_related_y',
+                      'd_related_u', 'd_related_v']
+    features_df['d_related_active_ratio'] = grouped[d_related_cols].apply(
+        lambda x: (x == 1).any(axis=1).sum() / len(x)
+    ).values
+    # e_related系列
+    e_related_cols = ['e_related_x', 'e_related_y',
+                      'e_related_u', 'e_related_v']
+    features_df['e_related_active_ratio'] = grouped[e_related_cols].apply(
+        lambda x: (x == 1).any(axis=1).sum() / len(x)
+    ).values
+
+    # 2. 时间偏好特征
+    # (1) 夜间活跃占比
+    features_df['night_ratio'] = grouped['night'].apply(
+        lambda x: (x == 1).sum() / len(x)
+    ).values
+    # (2) 休息时间活跃度
+    features_df['rest_ratio'] = grouped['rest'].apply(
+        lambda x: (x == 1).sum() / len(x)
+    ).values
+    # (3) 工作时间活跃度
+    features_df['job_ratio'] = grouped['job'].apply(
+        lambda x: (x == 1).sum() / len(x)
+    ).values
+    # (4) 工作日和休息日活跃差
+    features_df['weekday_weekend_diff'] = grouped.apply(
+        lambda x: (x['weekday'] == 1).sum() - (x['weekend'] == 1).sum()
+    ).values
+
+    return features_df
+
     """
     构建时间偏好行为特征(返回单独的特征DataFrame)
     参数:
@@ -143,15 +213,10 @@ if __name__ == "__main__":
     result_df = pd.read_csv("./data/user_merged.csv")
     processed_file = "./data/user_merged_processed.csv"
     result_df = handle_missing_values(result_df, save_path=processed_file)
-    """
-
-    # 主程序逻辑
     result_df = pd.read_csv("./data/user_merged_processed.csv")
-
     print("\n数据预览:")
     print(result_df.head(3))
-
-    # 时间偏好特征构建
-    time_features_df = build_time_features(result_df)
+    """
+    time_features_df = build_time_features("./data/user_time_base.csv")
     time_features_df.to_csv("./data/time_features.csv", index=False)
     print(time_features_df.head())
