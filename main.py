@@ -2,70 +2,50 @@ import pandas as pd
 import numpy as np
 
 
-def merge_user_data(time_path, static_path, label_path):
+def merge_data(time_features_path, static_features_path, label_path):
     """
-    根据用户id合并三个表格并保存结果
+    根据用户id合并时间特征、静态特征和标签表并保存结果
     参数:
-        time_path: 时间行为表路径
-        static_path: 静态属性表路径
+        time_features_path: 时间特征表路径
+        static_features_path: 静态特征表路径
         label_path: 用户标签表路径
     返回:
         合并后的DataFrame
     """
-    # ===== 时间行为表字段（共24列）=====
-    time_columns = [
-        'user_id', 'date', 'a_page', 'other_page', 'b_page', 'b_promotion', 'c_active',
-        'd_related_x', 'd_related_y', 'd_related_u', 'e_related_x', 'e_related_y', 'e_related_u', 'e_related_v',
-        'd_related_v',
-        'f_page', 'f_page_m', 'f_page_n', 'h_used',
-        'rest', 'job', 'night', 'weekend', 'weekday'
-    ]
-    # ===== 静态属性表字段（共32列）=====
-    static_columns = [
-        'user_id', 'p_eff_days', 'p_exp_days', 'p_pur_status',
-        'p_fee_type', 'p_fee_cycle', 'p_inc', 'p_capacity', 'p_pur_type',
-        'p_source_code_1', 'p_source_level', 'p_source_code_2', 'p_package_type',
-        'p_hard_type', 'p_pard_fomt', 'q_used', 'q_type', 'q_scale',
-        'q_capacity', 'q_open_days', 'q_exp_days', 'q_open_months', 'q_exp_months',
-        'q_status', 'a_pur', 'a_pur_type', 'a_state', 'a_source_type',
-        'a_bind', 'e_bind', 'd_bind', 'b_bind'
-    ]
-    # ===== 用户流失标签表字段（共2列）=====
+    # 读取标签表
     label_columns = ['user_id', 'label']
+    label_df = pd.read_csv(label_path, header=None, names=label_columns)
 
-    # 读取无列名文件
-    time_df = pd.read_csv(
-        time_path,
-        header=None,  # 文件无列名标题行
-        names=time_columns  # 使用自定义列名
-    )
-    static_df = pd.read_csv(
-        static_path,
-        header=None,
-        names=static_columns
-    )
-    label_df = pd.read_csv(
-        label_path,
-        header=None,
-        names=label_columns
-    )
-    print(f"时间行为表维度: {time_df.shape}")
-    print(f"静态属性表维度: {static_df.shape}")
-    print(f"用户流失标签表维度: {label_df.shape}")
+    # 读取时间特征表
+    time_features_df = pd.read_csv(time_features_path)
 
-    # 合并数据 (基于user_id)
+    # 读取静态特征表
+    static_features_df = pd.read_csv(static_features_path)
+
+    print(f"标签表维度: {label_df.shape}")
+    print(f"时间特征表维度: {time_features_df.shape}")
+    print(f"静态特征表维度: {static_features_df.shape}")
+
+    # 合并数据 (基于user_id)，确保每个用户都有标签
     merged_df = label_df.merge(
-        time_df,
+        time_features_df,
         on='user_id',
         how='left',
     ).merge(
-        static_df,
+        static_features_df,
         on='user_id',
         how='left',
     )
+
     print(f"合并完成: 总记录数 {len(merged_df)}")
     print("数据列预览:", merged_df.columns.tolist())
+
+    # 处理缺失值
+    merged_df = handle_missing_values(merged_df)
+
+    # 保存处理后的数据
     merged_df.to_csv("./data/user_merged.csv", index=False)
+    print(f"处理后的合并数据已保存至: ./data/user_merged.csv")
 
     return merged_df
 
@@ -85,9 +65,15 @@ def handle_missing_values(df, save_path=None):
             median = df[col].median()
             df[col].fillna(median, inplace=True)
         else:
-            # 类别型用 'Missing' 填充，效果不好的话可以改成众数
-            df[col].fillna('Missing', inplace=True)
-
+            # 类别型用众数填充，效果不好的话可以改成 'Missing'
+            mode_series = df[col].mode()
+            if len(mode_series) > 0:
+                # 如果存在众数，则使用众数填充
+                mode_value = mode_series[0]
+                df[col].fillna(mode_value, inplace=True)
+            else:
+                # 如果没有众数（所有值都是NaN），则用 'Missing' 填充
+                df[col].fillna('Missing', inplace=True)
     if save_path:
         df.to_csv(save_path, index=False)
         print(f"处理后的数据已保存至: {save_path}")
@@ -278,26 +264,59 @@ def build_static_features(static_path):
     return static_df
 
 
+def analyze_feature_types(df):
+    """
+    分析DataFrame中的特征类型
+    参数:
+        df: 要分析的DataFrame
+    """
+    numeric_features = []
+    string_features = []
+
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            numeric_features.append(col)
+        else:
+            string_features.append(col)
+
+    print(f"数值型特征数量: {len(numeric_features)}")
+    print(f"字符串型特征数量: {len(string_features)}")
+    print(f"总特征数量: {len(df.columns)}")
+
+    print("\n数值型特征列表:")
+    for i, feature in enumerate(numeric_features, 1):
+        print(f"{i:2d}. {feature}")
+
+    print("\n字符串型特征列表:")
+    for i, feature in enumerate(string_features, 1):
+        print(f"{i:2d}. {feature}")
+
+    return numeric_features, string_features
+
+
 if __name__ == "__main__":
     """
-    result_df = merge_user_data(
-        time_path="./data/user_time_base.csv",
-        static_path="./data/user_static_base.csv",
-        label_path='./data/user_label.csv'
-    )
-    result_df = pd.read_csv("./data/user_merged.csv")
-    print("\n数据预览:")
-    print(result_df.head(3))
-
     # 构建时间特征
     time_features_df = build_time_features("./data/user_time_base.csv")
     time_features_df.to_csv("./data/time_features.csv", index=False)
-    print(time_features_df.head())
-    """
 
     # 构建静态特征
     static_features_df = build_static_features("./data/user_static_base.csv")
     static_features_df.to_csv("./data/static_features.csv", index=False)
-    print("\n静态特征预览:")
-    print(static_features_df[['user_id', 'p_total_duration', 'q_total_duration',
-                             'p_remaining_ratio', 'q_remaining_ratio']].head())
+
+    # 合并最终数据
+    feature_df = merge_data(
+        time_features_path="./data/time_features.csv",
+        static_features_path="./data/static_features.csv",
+        label_path="./data/user_label.csv"
+    )
+    print("\n最终合并数据预览:")
+    print(final_df.head(3))
+
+    # 分析特征类型
+    print("\n=== 特征类型分析 ===")
+    numeric_features, string_features = analyze_feature_types(feature_df)
+    # 没有字符串型特征，均为数值型特征
+    """
+
+    feature_df = pd.read_csv("./data/user_merged.csv")
