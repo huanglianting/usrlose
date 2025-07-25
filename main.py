@@ -5,15 +5,16 @@ import numpy as np
 from feature_engineering import *
 
 
-def feature_selection_analysis(data_path, target_col='label', alpha=0.05):
+def feature_selection_analysis(data_path, target_col='label', alpha=0.1, mi_threshold=0.01):
     """
     对所有特征进行卡方检验和互信息分析，筛选与目标变量相关的特征
     参数:
         data_path: 数据文件路径
         target_col: 目标变量列名，默认为'label'
-        alpha: 显著性水平，默认为0.05
+        alpha: 显著性水平阈值，默认为0.1 (p值大于此值的特征将被剔除)
+        mi_threshold: 互信息阈值，默认为0.01 (MI小于此值的特征将被剔除)
     返回:
-        通过筛选的特征列表和详细结果
+        筛选后的特征列表和筛选后的数据
     """
     # 读取数据
     df = pd.read_csv(data_path)
@@ -26,7 +27,7 @@ def feature_selection_analysis(data_path, target_col='label', alpha=0.05):
     results = []
     selected_features = []
 
-    print(f"特征选择分析 (显著性水平 α = {alpha})")
+    print(f"特征选择分析 (显著性水平 α = {alpha}, MI阈值 = {mi_threshold})")
     print("=" * 60)
 
     for feature in all_features:
@@ -99,18 +100,29 @@ def feature_selection_analysis(data_path, target_col='label', alpha=0.05):
     if not results_df.empty:
         results_df = results_df.sort_values('mi_score', ascending=False)
 
-        print(f"\n通过筛选的特征数量: {len(selected_features)}")
-        print(f"总分析特征数量: {len(all_features)}")
-        print(
-            f"筛选比例: {len(selected_features)/len(all_features)*100:.1f}%")
+        # 根据条件进一步筛选特征
+        # 1. p值 < alpha (显著性检验通过)
+        # 2. MI > mi_threshold (互信息足够大)
+        final_selected = results_df[
+            (results_df['p_value'] < alpha) &
+            (results_df['mi_score'] > mi_threshold)
+        ]['feature'].tolist()
 
-        print("\n通过筛选的特征 (按互信息得分排序):")
-        significant_results = results_df[results_df['significant']]
-        for idx, row in significant_results.iterrows():
+        print(f"\n最终筛选结果:")
+        print(f"原始特征数: {len(all_features)}")
+        print(f"显著性筛选后特征数: {len(selected_features)}")
+        print(f"最终筛选后特征数: {len(final_selected)}")
+        print(f"最终保留特征:")
+        for feature in final_selected:
+            feature_info = results_df[results_df['feature'] == feature].iloc[0]
             print(
-                f"  {row['feature']:30s} | MI={row['mi_score']:.4f} | p={row['p_value']:.4f}")
+                f"  {feature:30s} | MI={feature_info['mi_score']:.4f} | p={feature_info['p_value']:.4f}")
 
-    return selected_features, results_df
+        # 创建筛选后的数据集（保留所有原始数据，只筛选特征列）
+        selected_columns = [target_col, 'user_id'] + final_selected
+        filtered_df = df[selected_columns].copy()
+
+        return final_selected, filtered_df
 
 
 if __name__ == "__main__":
@@ -141,11 +153,12 @@ if __name__ == "__main__":
     feature_df = pd.read_csv("./data/user_merged.csv")
 
     # 进行特征选择分析
-    print("开始特征选择分析...")
-    selected_features, analysis_results = feature_selection_analysis(
-        "./data/user_merged.csv")
+    selected_features, filtered_data = feature_selection_analysis(
+        "./data/user_merged.csv",
+        alpha=0.1,      # p < 0.1的特征保留
+        mi_threshold=0.01  # MI > 0.01的特征保留
+    )
 
-    # 保存分析结果
-    analysis_results.to_csv(
-        "./data/feature_selection_results.csv", index=False)
-    print(f"\n特征选择结果已保存至: ./data/feature_selection_results.csv")
+    # 保存筛选后的数据
+    filtered_data.to_csv("./data/filtered_user_data.csv", index=False)
+    print(f"\n筛选后的数据已保存至: ./data/filtered_user_data.csv")
