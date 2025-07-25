@@ -1,128 +1,11 @@
-from sklearn.feature_selection import chi2, mutual_info_classif
-from scipy.stats import chi2_contingency
 import pandas as pd
 import numpy as np
 from feature_engineering import *
-
-
-def feature_selection_analysis(data_path, target_col='label', alpha=0.1, mi_threshold=0.01):
-    """
-    对所有特征进行卡方检验和互信息分析，筛选与目标变量相关的特征
-    参数:
-        data_path: 数据文件路径
-        target_col: 目标变量列名，默认为'label'
-        alpha: 显著性水平阈值，默认为0.1 (p值大于此值的特征将被剔除)
-        mi_threshold: 互信息阈值，默认为0.01 (MI小于此值的特征将被剔除)
-    返回:
-        筛选后的特征列表和筛选后的数据
-    """
-    # 读取数据
-    df = pd.read_csv(data_path)
-
-    # 获取所有特征列（排除目标变量和user_id）
-    all_features = [col for col in df.columns if col not in [
-        target_col, 'user_id']]
-
-    # 存储结果
-    results = []
-    selected_features = []
-
-    print(f"特征选择分析 (显著性水平 α = {alpha}, MI阈值 = {mi_threshold})")
-    print("=" * 60)
-
-    for feature in all_features:
-        # 确保特征是数值型
-        df[feature] = pd.to_numeric(df[feature], errors='coerce')
-
-        # 检查缺失值
-        missing_count = df[feature].isna().sum()
-        if missing_count > 0:
-            print(f"警告: 特征 '{feature}' 存在 {missing_count} 个缺失值")
-            clean_data = df[[feature, target_col]].dropna()
-        else:
-            clean_data = df[[feature, target_col]]
-
-        if len(clean_data) == 0:
-            print(f"警告: 特征 '{feature}' 没有有效数据")
-            continue
-
-        # 检查特征是否只有一个唯一值
-        if len(clean_data[feature].unique()) <= 1:
-            print(f"警告: 特征 '{feature}' 只有一个唯一值，跳过")
-            continue
-
-        # 卡方检验
-        try:
-            # 创建列联表
-            contingency_table = pd.crosstab(
-                clean_data[feature], clean_data[target_col])
-
-            # 如果列联表维度太小，跳过
-            if contingency_table.shape[0] < 2 or contingency_table.shape[1] < 2:
-                print(f"特征 '{feature}': 列联表维度不足，跳过")
-                continue
-
-            chi2_stat, p_value, dof, expected = chi2_contingency(
-                contingency_table)
-
-            # 互信息
-            mi_score = mutual_info_classif(
-                clean_data[feature].values.reshape(-1, 1),
-                clean_data[target_col],
-                random_state=42
-            )[0]
-
-            # 判断是否显著
-            is_significant = p_value < alpha
-
-            results.append({
-                'feature': feature,
-                'chi2_statistic': chi2_stat,
-                'p_value': p_value,
-                'mi_score': mi_score,
-                'significant': is_significant
-            })
-
-            if is_significant:
-                selected_features.append(feature)
-                print(
-                    f"✓ {feature:30s} | χ²={chi2_stat:8.2f} | p={p_value:.4f} | MI={mi_score:.4f}")
-            else:
-                print(
-                    f"✗ {feature:30s} | χ²={chi2_stat:8.2f} | p={p_value:.4f} | MI={mi_score:.4f}")
-
-        except Exception as e:
-            print(f"特征 '{feature}' 计算出错: {str(e)}")
-            continue
-
-    # 排序结果
-    results_df = pd.DataFrame(results)
-    if not results_df.empty:
-        results_df = results_df.sort_values('mi_score', ascending=False)
-
-        # 根据条件进一步筛选特征
-        # 1. p值 < alpha (显著性检验通过)
-        # 2. MI > mi_threshold (互信息足够大)
-        final_selected = results_df[
-            (results_df['p_value'] < alpha) &
-            (results_df['mi_score'] > mi_threshold)
-        ]['feature'].tolist()
-
-        print(f"\n最终筛选结果:")
-        print(f"原始特征数: {len(all_features)}")
-        print(f"显著性筛选后特征数: {len(selected_features)}")
-        print(f"最终筛选后特征数: {len(final_selected)}")
-        print(f"最终保留特征:")
-        for feature in final_selected:
-            feature_info = results_df[results_df['feature'] == feature].iloc[0]
-            print(
-                f"  {feature:30s} | MI={feature_info['mi_score']:.4f} | p={feature_info['p_value']:.4f}")
-
-        # 创建筛选后的数据集（保留所有原始数据，只筛选特征列）
-        selected_columns = [target_col, 'user_id'] + final_selected
-        filtered_df = df[selected_columns].copy()
-
-        return final_selected, filtered_df
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
+import lightgbm as lgb
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 if __name__ == "__main__":
@@ -148,9 +31,6 @@ if __name__ == "__main__":
     print("\n=== 特征类型分析 ===")
     numeric_features, string_features = analyze_feature_types(feature_df)
     # 没有字符串型特征，均为数值型特征
-    """
-
-    feature_df = pd.read_csv("./data/user_merged.csv")
 
     # 进行特征选择分析
     selected_features, filtered_data = feature_selection_analysis(
@@ -162,3 +42,119 @@ if __name__ == "__main__":
     # 保存筛选后的数据
     filtered_data.to_csv("./data/filtered_user_data.csv", index=False)
     print(f"\n筛选后的数据已保存至: ./data/filtered_user_data.csv")
+    """
+
+    feature_df = pd.read_csv("./data/filtered_user_data.csv")
+
+    # 使用LightGBM建立预测模型
+    print("\n开始使用LightGBM建立用户流失预测模型...")
+
+    # 准备数据
+    X = feature_df.drop(['label', 'user_id'], axis=1)
+    y = feature_df['label']
+
+    print(f"训练数据形状: {X.shape}")
+    print(f"标签分布:\n{y.value_counts()}")
+
+    # 划分训练集和测试集
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    # 创建LightGBM数据集
+    train_data = lgb.Dataset(X_train, label=y_train)
+    valid_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
+
+    # 设置参数
+    params = {
+        'objective': 'binary',
+        'metric': 'binary_logloss',
+        'boosting_type': 'gbdt',
+        'num_leaves': 31,
+        'learning_rate': 0.05,
+        'feature_fraction': 0.9,
+        'bagging_fraction': 0.8,
+        'bagging_freq': 5,
+        'verbose': 0,
+        'random_state': 42
+    }
+
+    # 训练模型
+    print("训练LightGBM模型...")
+    model = lgb.train(
+        params,
+        train_data,
+        valid_sets=[train_data, valid_data],
+        valid_names=['train', 'eval'],
+        num_boost_round=1000,
+        callbacks=[lgb.early_stopping(
+            stopping_rounds=50), lgb.log_evaluation(100)]
+    )
+
+    # 预测
+    y_pred_proba = model.predict(X_test, num_iteration=model.best_iteration)
+    y_pred = (y_pred_proba > 0.5).astype(int)
+
+    # 评估模型
+    print("\n=== 模型评估结果 ===")
+    print(f"AUC Score: {roc_auc_score(y_test, y_pred_proba):.4f}")
+    print("\n分类报告:")
+    print(classification_report(y_test, y_pred))
+
+    # 混淆矩阵
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['未流失', '流失'],
+                yticklabels=['未流失', '流失'])
+    plt.title('混淆矩阵')
+    plt.xlabel('预测标签')
+    plt.ylabel('真实标签')
+    plt.tight_layout()
+    plt.savefig('./data/confusion_matrix.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # ROC曲线
+    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+    plt.figure(figsize=(8, 6))
+    plt.plot(fpr, tpr, color='darkorange', lw=2,
+             label=f'ROC曲线 (AUC = {roc_auc_score(y_test, y_pred_proba):.4f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='随机分类器')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('假正率 (False Positive Rate)')
+    plt.ylabel('真正率 (True Positive Rate)')
+    plt.title('ROC曲线')
+    plt.legend(loc="lower right")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig('./data/roc_curve.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 特征重要性
+    feature_importance = pd.DataFrame({
+        'feature': X.columns,
+        'importance': model.feature_importance(importance_type='gain')
+    }).sort_values('importance', ascending=False)
+
+    print("\n=== 特征重要性 (前10个) ===")
+    print(feature_importance.head(10))
+
+    # 绘制特征重要性图
+    plt.figure(figsize=(10, 8))
+    top_features = feature_importance.head(15)
+    sns.barplot(data=top_features, y='feature',
+                x='importance', palette='viridis')
+    plt.title('LightGBM特征重要性 (前15个)')
+    plt.xlabel('重要性得分')
+    plt.tight_layout()
+    plt.savefig('./data/feature_importance.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 保存模型
+    model.save_model('./data/lgbm_churn_model.txt')
+    print(f"\n模型已保存至: ./data/lgbm_churn_model.txt")
+
+    # 保存特征重要性
+    feature_importance.to_csv('./data/feature_importance.csv', index=False)
+    print(f"特征重要性已保存至: ./data/feature_importance.csv")
