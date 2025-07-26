@@ -76,14 +76,6 @@ if __name__ == "__main__":
     print(f"训练集标签分布:\n{y_train.value_counts()}")
     print(f"测试集标签分布:\n{y_test.value_counts()}")
 
-    # 计算类别不平衡权重
-    neg_count = (y_train == 0).sum()
-    pos_count = (y_train == 1).sum()
-    scale_pos_weight = neg_count / pos_count
-    print(
-        f"正负样本比例 (0:1): {neg_count}:{pos_count} = 1:{pos_count/neg_count:.2f}")
-    print(f"scale_pos_weight 设置为: {scale_pos_weight:.2f}")
-
     # 创建LightGBM数据集
     train_data = lgb.Dataset(X_train, label=y_train)
     valid_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
@@ -94,15 +86,10 @@ if __name__ == "__main__":
         'metric': 'binary_logloss',
         'boosting_type': 'gbdt',
         'num_leaves': 31,
-        'learning_rate': 0.1,       # 稍微提高学习率以加快收敛
-        'feature_fraction': 0.8,    # 稍微减少特征采样比例
+        'learning_rate': 0.05,
+        'feature_fraction': 0.9,
         'bagging_fraction': 0.8,
         'bagging_freq': 5,
-        'min_data_in_leaf': 50,     # 增加叶子节点最小样本数
-        'scale_pos_weight': 1.0,    # 使用固定值1.0，让模型更关注少数类
-        'lambda_l1': 0.0,           # 不使用L1正则化
-        'lambda_l2': 1.0,           # 使用适度的L2正则化
-        'min_gain_to_split': 0.01,  # 设置最小分割增益
         'verbose': 0,
         'random_state': 42
     }
