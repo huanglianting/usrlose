@@ -1,12 +1,22 @@
 import pandas as pd
 import numpy as np
-from feature_engineering import *
+# from feature_engineering import *
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
 import lightgbm as lgb
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.font_manager as fm
+import os
 
+
+# 设置中文字体支持
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+
+# 设置统一的保存路径
+save_path = './result'
+os.makedirs(save_path, exist_ok=True)  # 创建文件夹（如果不存在）
 
 if __name__ == "__main__":
     """
@@ -46,20 +56,25 @@ if __name__ == "__main__":
 
     feature_df = pd.read_csv("./data/filtered_user_data.csv")
 
+    # 按照user_id顺序划分训练集和测试集
+    train_df = feature_df[feature_df['user_id'] <= 640000]
+    test_df = feature_df[feature_df['user_id'] > 640000]
+    print(f"训练集样本数: {len(train_df)}")
+    print(f"测试集样本数: {len(test_df)}")
+
     # 使用LightGBM建立预测模型
     print("\n开始使用LightGBM建立用户流失预测模型...")
 
     # 准备数据
-    X = feature_df.drop(['label', 'user_id'], axis=1)
-    y = feature_df['label']
+    X_train = train_df.drop(['label', 'user_id'], axis=1)
+    y_train = train_df['label']
+    X_test = test_df.drop(['label', 'user_id'], axis=1)
+    y_test = test_df['label']
 
-    print(f"训练数据形状: {X.shape}")
-    print(f"标签分布:\n{y.value_counts()}")
-
-    # 划分训练集和测试集
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    print(f"训练数据形状: {X_train.shape}")
+    print(f"测试数据形状: {X_test.shape}")
+    print(f"训练集标签分布:\n{y_train.value_counts()}")
+    print(f"测试集标签分布:\n{y_test.value_counts()}")
 
     # 创建LightGBM数据集
     train_data = lgb.Dataset(X_train, label=y_train)
@@ -105,35 +120,38 @@ if __name__ == "__main__":
     cm = confusion_matrix(y_test, y_pred)
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=['未流失', '流失'],
-                yticklabels=['未流失', '流失'])
-    plt.title('混淆矩阵')
-    plt.xlabel('预测标签')
-    plt.ylabel('真实标签')
+                xticklabels=['Not Churn', 'Churn'],
+                yticklabels=['Not Churn', 'Churn'])
+    plt.title('Confusion Matrix')
+    plt.xlabel('Predicted Label')
+    plt.ylabel('True Label')
     plt.tight_layout()
-    plt.savefig('./data/confusion_matrix.png', dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'confusion_matrix.png'),
+                dpi=300, bbox_inches='tight')
     plt.show()
 
     # ROC曲线
     fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
     plt.figure(figsize=(8, 6))
     plt.plot(fpr, tpr, color='darkorange', lw=2,
-             label=f'ROC曲线 (AUC = {roc_auc_score(y_test, y_pred_proba):.4f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='随机分类器')
+             label=f'ROC Curve (AUC = {roc_auc_score(y_test, y_pred_proba):.4f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2,
+             linestyle='--', label='Random Classifier')
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
-    plt.xlabel('假正率 (False Positive Rate)')
-    plt.ylabel('真正率 (True Positive Rate)')
-    plt.title('ROC曲线')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
     plt.legend(loc="lower right")
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig('./data/roc_curve.png', dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'roc_curve.png'),
+                dpi=300, bbox_inches='tight')
     plt.show()
 
     # 特征重要性
     feature_importance = pd.DataFrame({
-        'feature': X.columns,
+        'feature': X_train.columns,
         'importance': model.feature_importance(importance_type='gain')
     }).sort_values('importance', ascending=False)
 
@@ -145,16 +163,18 @@ if __name__ == "__main__":
     top_features = feature_importance.head(15)
     sns.barplot(data=top_features, y='feature',
                 x='importance', palette='viridis')
-    plt.title('LightGBM特征重要性 (前15个)')
-    plt.xlabel('重要性得分')
+    plt.title('LightGBM Feature Importance (Top 15)')
+    plt.xlabel('Importance Score')
     plt.tight_layout()
-    plt.savefig('./data/feature_importance.png', dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'feature_importance.png'),
+                dpi=300, bbox_inches='tight')
     plt.show()
 
     # 保存模型
-    model.save_model('./data/lgbm_churn_model.txt')
-    print(f"\n模型已保存至: ./data/lgbm_churn_model.txt")
+    model.save_model(os.path.join(save_path, 'lgbm_churn_model.txt'))
+    print(f"\n模型已保存至: {os.path.join(save_path, 'lgbm_churn_model.txt')}")
 
     # 保存特征重要性
-    feature_importance.to_csv('./data/feature_importance.csv', index=False)
-    print(f"特征重要性已保存至: ./data/feature_importance.csv")
+    feature_importance.to_csv(os.path.join(
+        save_path, 'feature_importance.csv'), index=False)
+    print(f"特征重要性已保存至: {os.path.join(save_path, 'feature_importance.csv')}")
