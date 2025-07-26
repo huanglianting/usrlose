@@ -93,13 +93,16 @@ if __name__ == "__main__":
         'objective': 'binary',
         'metric': 'binary_logloss',
         'boosting_type': 'gbdt',
-        'num_leaves': 31,           # 回到原始设置
-        'learning_rate': 0.05,      # 保持适中的学习率
-        'feature_fraction': 0.9,    # 回到原始设置
+        'num_leaves': 31,
+        'learning_rate': 0.1,       # 稍微提高学习率以加快收敛
+        'feature_fraction': 0.8,    # 稍微减少特征采样比例
         'bagging_fraction': 0.8,
         'bagging_freq': 5,
-        'min_data_in_leaf': 20,     # 添加适度的约束
-        'scale_pos_weight': scale_pos_weight,  # 处理类别不平衡问题
+        'min_data_in_leaf': 50,     # 增加叶子节点最小样本数
+        'scale_pos_weight': 1.0,    # 使用固定值1.0，让模型更关注少数类
+        'lambda_l1': 0.0,           # 不使用L1正则化
+        'lambda_l2': 1.0,           # 使用适度的L2正则化
+        'min_gain_to_split': 0.01,  # 设置最小分割增益
         'verbose': 0,
         'random_state': 42
     }
@@ -111,9 +114,9 @@ if __name__ == "__main__":
         train_data,
         valid_sets=[train_data, valid_data],
         valid_names=['train', 'eval'],
-        num_boost_round=1500,       # 增加训练轮数
+        num_boost_round=1000,
         callbacks=[lgb.early_stopping(
-            stopping_rounds=100), lgb.log_evaluation(100)]  # 增加早停轮数
+            stopping_rounds=50), lgb.log_evaluation(100)]
     )
 
     # 预测
